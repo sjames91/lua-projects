@@ -12,3 +12,7 @@ Games and game engines written in Lua: LÖVE games, plus microStudio projects in
 
 - [`microstudio/`](microstudio) has Chispita, Shmup, and [four small example games](microstudio/games) built on Chispita.
 - [`love2d/`](love2d) has games made with [LÖVE](https://love2d.org), including the earlier Lua version of the engine.
+
+## License
+
+Free and open source. Code is under the [MIT License](LICENSE). Written content and docs are under [CC BY-SA 4.0](LICENSE-CONTENT.md).
