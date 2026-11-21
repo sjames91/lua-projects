@@ -1,0 +1,458 @@
+// TINY QUEST - a top-down dungeon adventure made with Chispita.
+// Arrows walk, SPACE swings your sword. Find the key, open the door at the
+// top of the room and take the stairs. The last room has a guardian.
+// You have 3 hearts per life.
+// Needs: the chispita engine files and arcade in the same project (see README).
+
+init = function()
+  arcade_setup("TINY QUEST", "ARROWS WALK   SPACE SWORD", ["THE GROVE", "THE CRYPT", "THE LAIR"])
+end
+
+update = function()
+  arcade_update()
+end
+
+draw = function()
+  arcade_draw()
+end
+
+// ---------------------------------------------------------------- setup ----
+
+game_init = function()
+  Mode = "topdown"
+  Background = "rgb(20,24,20)"
+  half_w = screen.width / 2
+  half_h = screen.height / 2
+
+  // The room fills the screen, leaving space for the score at the top
+  room_w = min(150, half_w - 8)   // half the room's width
+  room_top = 75
+  room_bottom = -95
+
+  make_room()
+  make_hero()
+
+  stage_parts = []
+  build_stage_1()
+  build_stage_2()
+  build_stage_3()
+end
+
+wall = function(x, y, width, height)
+  local s = Chispita.addRect(x, y, width, height)
+  s.fixed = 1
+  s.color = "rgb(90,90,110)"
+  return s
+end
+
+make_room = function()
+  local middle_y = (room_top + room_bottom) / 2
+  local height = room_top - room_bottom + 16
+  wall(-room_w - 4, middle_y, 8, height)
+  wall(room_w + 4, middle_y, 8, height)
+  wall(0, room_bottom - 4, room_w * 2 + 16, 8)
+
+  // The top wall has a gap in the middle for the door
+  local piece = room_w - 4
+  wall(-(12 + piece / 2), room_top + 4, piece, 8)
+  wall(12 + piece / 2, room_top + 4, piece, 8)
+
+  door = Chispita.addRect(0, room_top + 4, 24, 8)
+  door.fixed = 1
+  door.role = "door"
+  door.color = "rgb(150,90,40)"
+
+  stairs = Chispita.addRect(0, room_top + 13, 24, 10)
+  stairs.fixed = 1
+  stairs.solid = 0
+  stairs.role = "exit"
+  stairs.color = "rgb(40,40,50)"
+end
+
+make_hero = function()
+  hero = Chispita.addRect(0, 0, 10, 10)
+  hero.name = "hero"
+  hero.color = "rgb(80,200,120)"
+  hero.trigger = 1
+  hero.group = "hero"
+  hero.bounciness = 0
+  hero.facing_x = 0
+  hero.facing_y = 1
+  hero.swing = 0
+  hero.cooldown = 0
+  hero.stun = 0
+  hero.invulnerable = 0
+
+  // The sword is a hurt box that's only switched on during a swing
+  hero.hurt_width = 12
+  hero.hurt_height = 12
+  hero.on_hurt = function(me, other)
+    if other.role == "enemy" then hit_enemy(other) end
+  end
+
+  hero.on_enter = hero_touch
+  // Touching an enemy hurts every frame (invulnerability stops repeats)
+  hero.callback = function(me, other)
+    if other.role == "enemy" then hurt_hero(other) end
+  end
+
+  sword = Chispita.addRect(0, 0, 12, 3, 1)
+  sword.color = "rgb(230,230,255)"
+  sword.visible = 0
+  Chispita.setLayer(sword, 2)
+end
+
+// ---- Stage building helpers
+
+begin_stage = function()
+  building = []
+  stage_parts.push(building)
+end
+
+add_part = function(s)
+  s.home_x = s.x
+  s.home_y = s.y
+  building.push(s)
+  Chispita.disable(s)
+  return s
+end
+
+rock = function(x, y, width, height)
+  if not width then width = 14 end
+  if not height then height = width end
+  local s = Chispita.addRect(x, y, width, height)
+  s.fixed = 1
+  s.color = "rgb(110,100,80)"
+  return add_part(s)
+end
+
+enemy = function(type, x, y, hp, color, radius)
+  local e = Chispita.addCircle(x, y, radius)
+  e.role = "enemy"
+  e.type = type
+  e.max_hp = hp
+  e.base_color = color
+  e.color = color
+  e.bounciness = 0.5
+  return add_part(e)
+end
+
+slime = function(x, y)
+  return enemy("slime", x, y, 2, "rgb(100,220,255)", 5)
+end
+
+bat = function(x, y)
+  return enemy("bat", x, y, 1, "rgb(200,100,220)", 4)
+end
+
+guardian = function(x, y)
+  local e = enemy("boss", x, y, 10, "rgb(255,90,60)", 14)
+  e.is_boss = 1
+  return e
+end
+
+key = function(x, y)
+  local s = Chispita.addRect(x, y, 6, 8)
+  s.fixed = 1
+  s.solid = 0
+  s.role = "key"
+  s.color = "rgb(255,220,0)"
+  return add_part(s)
+end
+
+// ---- The three rooms (keep things within about 110 of the center so they
+// fit narrow screens too)
+
+build_stage_1 = function()
+  begin_stage()
+  rock(-60, 20)
+  rock(60, 20)
+  rock(-60, -40)
+  rock(60, -40)
+  slime(-90, 40)
+  slime(90, 40)
+  slime(0, -20)
+  key(-100, -70)
+end
+
+build_stage_2 = function()
+  begin_stage()
+  rock(-40, 0, 8, 110)
+  rock(40, 20, 8, 110)
+  rock(-90, 30, 50, 8)
+  rock(90, -30, 50, 8)
+  slime(-80, -60)
+  slime(80, 50)
+  slime(0, 40)
+  slime(0, -60)
+  bat(-100, 60)
+  bat(100, -70)
+  key(100, 60)
+end
+
+build_stage_3 = function()
+  begin_stage()
+  rock(-80, 40)
+  rock(80, 40)
+  rock(-80, -50)
+  rock(80, -50)
+  guardian(0, 20)
+  bat(-100, 0)
+  bat(100, 0)
+end
+
+// ------------------------------------------------------------ stages ----
+
+game_build_stage = function(n)
+  for parts in stage_parts
+    for s in parts
+      Chispita.disable(s)
+    end
+  end
+  for s in stage_parts[n - 1]
+    Chispita.enable(s)
+    s.x = s.home_x
+    s.y = s.home_y
+    s.vx = 0
+    s.vy = 0
+    if s.role == "enemy" then
+      s.hp = s.max_hp
+      s.stun = 0
+      s.flash = 0
+      s.think = 0
+      s.timer = 2
+      s.charging = 0
+      s.t = Chispita.randomRange(0, 6)
+    end
+  end
+  Chispita.enable(door)
+  has_key = 0
+  game_respawn()
+end
+
+game_respawn = function()
+  Chispita.enable(hero)
+  hero.x = 0
+  hero.y = room_bottom + 15
+  hero.vx = 0
+  hero.vy = 0
+  hero.hearts = 3
+  hero.invulnerable = 1
+  hero.stun = 0
+  hero.swing = 0
+  hero.hurt_box = 0
+end
+
+// ------------------------------------------------------------ events ----
+
+hero_touch = function(me, other)
+  if other.role == "key" then
+    Chispita.disable(other)
+    Chispita.burst(other.x, other.y, 12, other.color, 40, 0.4)
+    has_key = 1
+    arcade_add_score(100)
+  elsif other.role == "door" and has_key then
+    open_door()
+  elsif other.role == "exit" and Arcade.state == "play" then
+    arcade_add_score(500 + hero.hearts * 200)
+    arcade_stage_clear()
+  end
+end
+
+open_door = function()
+  if not door.active then return end
+  Chispita.disable(door)
+  Chispita.burst(door.x, door.y, 20, door.color, 50, 0.5)
+  has_key = 0
+  arcade_add_score(200)
+end
+
+hurt_hero = function(enemy)
+  if hero.invulnerable > 0 or not hero.active then return end
+  hero.hearts -= 1
+  hero.invulnerable = 1
+  // Knocked away from the enemy
+  local away = Chispita.normalize(hero.x - enemy.x, hero.y - enemy.y)
+  hero.vx = away.x * 220
+  hero.vy = away.y * 220
+  hero.stun = 0.15
+  Chispita.shake(2, 0.15)
+  if hero.hearts <= 0 then
+    Chispita.burst(hero.x, hero.y, 24, hero.color, 70, 0.7)
+    Chispita.disable(hero)
+    sword.visible = 0
+    arcade_player_died()
+  end
+end
+
+hit_enemy = function(e)
+  e.hp -= 1
+  e.flash = 0.1
+  e.stun = 0.25
+  local away = Chispita.normalize(e.x - hero.x, e.y - hero.y)
+  e.vx = away.x * 250
+  e.vy = away.y * 250
+  if e.hp > 0 then return end
+
+  Chispita.disable(e)
+  if e.is_boss then
+    Chispita.burst(e.x, e.y, 60, e.base_color, 100, 1, 3)
+    Chispita.shake(4, 0.6)
+    arcade_add_score(3000)
+    open_door()
+  else
+    Chispita.burst(e.x, e.y, 12, e.base_color)
+    if e.type == "bat" then arcade_add_score(150) else arcade_add_score(100) end
+  end
+end
+
+// ------------------------------------------------------------ each frame ----
+
+game_update = function()
+  local dt = Chispita.deltaTime()   // 0 while debug-paused, follows Time_scale
+  update_enemies(dt)
+  if Arcade.state == "play" then update_hero(dt) end
+end
+
+update_hero = function(dt)
+  if not hero.active then return end
+
+  if hero.invulnerable > 0 then
+    hero.invulnerable -= dt
+    hero.visible = floor(system.time() / 80) % 2
+  else
+    hero.visible = 1
+  end
+
+  // Walking (unless knocked back)
+  local ix = keyboard.RIGHT - keyboard.LEFT
+  local iy = keyboard.UP - keyboard.DOWN
+  if ix != 0 then
+    hero.facing_x = ix
+    hero.facing_y = 0
+  elsif iy != 0 then
+    hero.facing_x = 0
+    hero.facing_y = iy
+  end
+
+  if hero.stun > 0 then
+    hero.stun -= dt
+  else
+    local speed = 75
+    if hero.swing > 0 then speed = 30 end
+    local direction = Chispita.normalize(ix, iy)
+    hero.vx = direction.x * speed
+    hero.vy = direction.y * speed
+  end
+
+  // Sword
+  hero.cooldown -= dt
+  if keyboard.press.SPACE and hero.cooldown <= 0 then
+    hero.swing = 0.15
+    hero.cooldown = 0.3
+  end
+
+  if hero.swing > 0 then
+    hero.swing -= dt
+    hero.hurt_box = 1
+    hero.hurt_offset_x = hero.facing_x * 11
+    hero.hurt_offset_y = hero.facing_y * 11
+    sword.visible = 1
+    sword.x = hero.x + hero.facing_x * 11
+    sword.y = hero.y + hero.facing_y * 11
+    if hero.facing_x != 0 then
+      sword.width = 12
+      sword.height = 3
+    else
+      sword.width = 3
+      sword.height = 12
+    end
+  else
+    hero.hurt_box = 0
+    sword.visible = 0
+  end
+end
+
+update_enemies = function(dt)
+  for e in stage_parts[Arcade.stage - 1]
+    if not (e.active and e.role == "enemy") then continue end
+    e.t += dt
+
+    if e.flash > 0 then
+      e.flash -= dt
+      e.color = "rgb(255,255,255)"
+    else
+      e.color = e.base_color
+    end
+
+    // Knocked back: let it slide
+    if e.stun > 0 then
+      e.stun -= dt
+      continue
+    end
+    if Arcade.state != "play" or not hero.active then
+      e.vx = 0
+      e.vy = 0
+      continue
+    end
+
+    if e.type == "slime" then
+      // Pick a new direction every so often, sometimes just sit still
+      e.think -= dt
+      if e.think <= 0 then
+        e.think = Chispita.randomRange(0.8, 1.8)
+        local choice = Chispita.randomInt(0, 4)
+        e.dir_x = 0
+        e.dir_y = 0
+        if choice == 1 then e.dir_x = 1 end
+        if choice == 2 then e.dir_x = -1 end
+        if choice == 3 then e.dir_y = 1 end
+        if choice == 4 then e.dir_y = -1 end
+      end
+      e.vx = e.dir_x * 30
+      e.vy = e.dir_y * 30
+
+    elsif e.type == "bat" then
+      // Flutters about, swoops at the hero when close
+      if Chispita.distanceBetween(e, hero) < 90 then
+        Chispita.moveToward(e, hero.x, hero.y, 50)
+      else
+        e.vx = cos(e.t * 2) * 30
+        e.vy = sin(e.t * 3) * 30
+      end
+
+    elsif e.type == "boss" then
+      // Creeps toward the hero, then charges every 2 seconds
+      e.timer -= dt
+      if e.charging > 0 then
+        e.charging -= dt
+        e.vx = e.charge_x
+        e.vy = e.charge_y
+      else
+        Chispita.moveToward(e, hero.x, hero.y, 20 + (e.max_hp - e.hp) * 3)
+        if e.timer <= 0 then
+          local aim = Chispita.normalize(hero.x - e.x, hero.y - e.y)
+          e.charge_x = aim.x * 150
+          e.charge_y = aim.y * 150
+          e.charging = 0.6
+          e.timer = 2
+        end
+      end
+    end
+  end
+end
+
+// ------------------------------------------------------------ drawing ----
+
+game_draw = function()
+  if not hero.active then return end
+  // Hearts and key along the bottom-left
+  local left = -half_w + 8
+  local bottom = -half_h + 5
+  for i = 0 to 2
+    local color = "rgb(80,20,20)"
+    if i < hero.hearts then color = "rgb(255,60,60)" end
+    screen.fillRect(left + i * 8, bottom, 6, 5, color)
+  end
+  if has_key then screen.fillRect(left + 30, bottom, 4, 6, "rgb(255,220,0)") end
+end

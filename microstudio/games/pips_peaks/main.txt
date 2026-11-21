@@ -1,0 +1,315 @@
+// PIP'S PEAKS - a micro platformer made with Chispita.
+// LEFT/RIGHT run, UP or SPACE jump (hold for higher), DOWN drops through
+// thin ledges. Grab coins, stomp walkers, avoid spikes, reach the flag.
+// Needs: the chispita engine files and arcade in the same project (see README).
+
+init = function()
+  arcade_setup("PIP'S PEAKS", "ARROWS RUN   UP / SPACE JUMP", ["GREEN HILLS", "SKY LIFTS", "SPIKE PEAK"])
+end
+
+update = function()
+  arcade_update()
+end
+
+draw = function()
+  arcade_draw()
+end
+
+// ---------------------------------------------------------------- setup ----
+
+game_init = function()
+  Mode = "platformer"
+  Background = "rgb(40,60,110)"
+  Camera.smooth = 0.12
+
+  // Every stage is built once at the start. Its pieces are kept in a list
+  // and switched on only while that stage is being played.
+  stage_parts = []
+  stage_starts = []
+  stage_ends = []
+  build_stage_1()
+  build_stage_2()
+  build_stage_3()
+
+  player = Chispita.addRect(0, 0, 10, 12)
+  player.name = "pip"
+  player.color = "rgb(255,200,80)"
+  player.trigger = 1
+  player.bounciness = 0
+  player.on_enter = player_touch
+  Chispita.setTarget(player)
+end
+
+// ---- Level building helpers. Each one adds a piece to the stage being built.
+// "top" is the y of the surface you stand on.
+
+begin_stage = function(start_x, start_y, end_x)
+  building = []
+  stage_parts.push(building)
+  local start = object end
+  start.x = start_x
+  start.y = start_y
+  stage_starts.push(start)
+  stage_ends.push(end_x)
+end
+
+add_part = function(s)
+  s.home_x = s.x
+  s.home_y = s.y
+  s.home_vx = s.vx
+  s.home_vy = s.vy
+  building.push(s)
+  Chispita.disable(s)
+  return s
+end
+
+ground = function(x1, x2, top)
+  local depth = 80
+  local s = Chispita.addRect((x1 + x2) / 2, top - depth / 2, x2 - x1, depth)
+  s.fixed = 1
+  s.color = "rgb(70,130,70)"
+  return add_part(s)
+end
+
+block = function(x, top, width, height)
+  local s = Chispita.addRect(x, top - height / 2, width, height)
+  s.fixed = 1
+  s.color = "rgb(150,100,60)"
+  return add_part(s)
+end
+
+ledge = function(x, top, width)
+  local s = Chispita.addRect(x, top - 2, width, 4)
+  s.fixed = 1
+  s.one_way = 1
+  s.color = "rgb(200,170,110)"
+  return add_part(s)
+end
+
+// A moving platform that travels range units either side of where it starts
+lift = function(x, top, width, range, vx, vy)
+  local s = Chispita.addRect(x, top - 3, width, 6)
+  s.kinematic = 1
+  s.color = "rgb(180,120,220)"
+  s.vx = vx
+  s.vy = vy
+  s.range = range
+  return add_part(s)
+end
+
+coin = function(x, y)
+  local s = Chispita.addCircle(x, y, 3)
+  s.fixed = 1
+  s.solid = 0
+  s.role = "coin"
+  s.color = "rgb(255,230,0)"
+  return add_part(s)
+end
+
+spikes = function(x1, x2, top)
+  local s = Chispita.addRect((x1 + x2) / 2, top + 3, x2 - x1, 6)
+  s.fixed = 1
+  s.solid = 0
+  s.role = "spike"
+  s.color = "rgb(230,60,60)"
+  return add_part(s)
+end
+
+walker = function(x, top, range)
+  local s = Chispita.addRect(x, top + 4, 12, 8)
+  s.kinematic = 1
+  s.solid = 0
+  s.role = "enemy"
+  s.color = "rgb(120,60,160)"
+  s.vx = 25
+  s.range = range
+  return add_part(s)
+end
+
+goal = function(x, top)
+  local s = Chispita.addRect(x, top + 15, 4, 30)
+  s.fixed = 1
+  s.solid = 0
+  s.role = "goal"
+  s.color = "rgb(255,255,255)"
+  add_part(s)
+  local flag = Chispita.addRect(x + 7, top + 25, 10, 8, 1)
+  flag.color = "rgb(255,80,80)"
+  return add_part(flag)
+end
+
+// ---- The three stages
+
+build_stage_1 = function()
+  begin_stage(-150, -60, 800)
+  ground(-200, 260, -80)
+  coin(40, -66)
+  coin(55, -66)
+  coin(70, -66)
+  walker(110, -80, 40)
+  block(170, -40, 30, 40)
+  ledge(225, -40, 40)
+  coin(225, -28)
+  ground(320, 560, -80)
+  spikes(395, 435, -80)
+  coin(415, -45)
+  walker(490, -80, 50)
+  ledge(530, -40, 40)
+  coin(530, -28)
+  ground(600, 800, -60)
+  coin(640, -46)
+  coin(655, -46)
+  goal(760, -60)
+end
+
+build_stage_2 = function()
+  begin_stage(-150, -60, 900)
+  ground(-200, 100, -80)
+  walker(20, -80, 50)
+  lift(170, -60, 40, 50, 35, 0)
+  coin(170, -40)
+  ground(260, 380, -60)
+  spikes(295, 330, -60)
+  ledge(312, -20, 40)
+  coin(312, -8)
+  lift(440, -60, 36, 40, 0, 30)
+  ground(500, 640, -40)
+  walker(570, -40, 40)
+  ledge(600, 0, 40)
+  coin(590, 12)
+  coin(610, 12)
+  ground(700, 900, -80)
+  coin(740, -66)
+  coin(760, -66)
+  goal(860, -80)
+end
+
+build_stage_3 = function()
+  begin_stage(-150, -60, 1000)
+  ground(-200, 200, -80)
+  block(40, -40, 20, 40)
+  block(100, 0, 20, 80)
+  block(160, 40, 20, 120)
+  coin(160, 54)
+  lift(250, 30, 30, 40, 40, 0)
+  lift(350, 0, 30, 30, 0, 40)
+  ground(420, 560, -40)
+  spikes(450, 480, -40)
+  walker(520, -40, 30)
+  ledge(600, -10, 30)
+  ledge(650, 20, 30)
+  ledge(700, 50, 30)
+  coin(700, 62)
+  ground(740, 1000, -80)
+  spikes(780, 820, -80)
+  coin(800, -40)
+  walker(900, -80, 40)
+  goal(960, -80)
+end
+
+// ------------------------------------------------------------ stages ----
+
+game_build_stage = function(n)
+  // Switch every stage's pieces off, then switch on and reset this one's
+  for parts in stage_parts
+    for s in parts
+      Chispita.disable(s)
+    end
+  end
+  for s in stage_parts[n - 1]
+    Chispita.enable(s)
+    s.x = s.home_x
+    s.y = s.home_y
+    s.vx = s.home_vx
+    s.vy = s.home_vy
+  end
+  Chispita.setCameraBounds(-200, -120, stage_ends[n - 1], 200)
+  game_respawn()
+end
+
+game_respawn = function()
+  local start = stage_starts[Arcade.stage - 1]
+  Chispita.enable(player)
+  player.x = start.x
+  player.y = start.y
+  player.vx = 0
+  player.vy = 0
+  Camera.x = player.x
+  Camera.y = player.y
+end
+
+// ------------------------------------------------------------ events ----
+
+player_touch = function(me, other)
+  if not me.active then return end
+  if other.role == "coin" then
+    Chispita.disable(other)
+    Chispita.burst(other.x, other.y, 8, other.color, 40, 0.3)
+    arcade_add_score(50)
+  elsif other.role == "spike" then
+    kill_player()
+  elsif other.role == "enemy" then
+    // Landing on top stomps it, anything else hurts
+    if me.vy <= 0 and me.y > other.y + 4 then
+      Chispita.disable(other)
+      Chispita.burst(other.x, other.y, 14, other.color)
+      me.vy = 180
+      arcade_add_score(200)
+    else
+      kill_player()
+    end
+  elsif other.role == "goal" and Arcade.state == "play" then
+    arcade_add_score(1000)
+    Chispita.burst(other.x, other.y + 20, 30, "rgb(255,255,255)", 80, 0.8)
+    arcade_stage_clear()
+  end
+end
+
+kill_player = function()
+  if not player.active then return end
+  Chispita.burst(player.x, player.y, 24, player.color, 80, 0.7)
+  Chispita.disable(player)
+  arcade_player_died()
+end
+
+// ------------------------------------------------------------ each frame ----
+
+game_update = function()
+  update_movers()
+  if Arcade.state == "play" then update_player() end
+end
+
+// Lifts and walkers turn around at the ends of their range
+update_movers = function()
+  for s in stage_parts[Arcade.stage - 1]
+    if not (s.active and s.range) then continue end
+    local dx = s.x - s.home_x
+    local dy = s.y - s.home_y
+    if dx > s.range then s.vx = -abs(s.vx) end
+    if dx < -s.range then s.vx = abs(s.vx) end
+    if dy > s.range then s.vy = -abs(s.vy) end
+    if dy < -s.range then s.vy = abs(s.vy) end
+  end
+end
+
+update_player = function()
+  if not player.active then return end
+  local jump_held = keyboard.UP or keyboard.SPACE
+
+  if keyboard.LEFT then player.vx -= 20 end
+  if keyboard.RIGHT then player.vx += 20 end
+  player.vx = Chispita.clamp(player.vx, -110, 110)
+
+  if (keyboard.press.UP or keyboard.press.SPACE) and player.grounded then
+    player.vy = 230
+  end
+  // Letting go early makes a short hop
+  if not jump_held and player.vy > 60 then player.vy = 60 end
+
+  player.drop_through = keyboard.DOWN
+
+  if player.y < -170 then kill_player() end
+end
+
+game_draw = function()
+end

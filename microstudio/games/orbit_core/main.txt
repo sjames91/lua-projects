@@ -1,0 +1,337 @@
+// ORBIT CORE - a rotational bullet hell made with Chispita.
+// You fly in a circle around a core that sprays bullet patterns.
+// LEFT/RIGHT orbit around it, UP/DOWN move closer or farther,
+// hold SPACE to fire, hold Z to focus (slower, shows your tiny hit box),
+// X = bomb (clears every bullet, 2 per life).
+// Flying close past bullets ("grazing") scores extra points.
+// Needs: the chispita engine files and arcade in the same project (see README).
+
+init = function()
+  arcade_setup("ORBIT CORE", "ARROWS ORBIT  SPACE FIRE  Z FOCUS  X BOMB", ["CORE ALPHA", "CORE BETA", "CORE OMEGA"])
+end
+
+update = function()
+  arcade_update()
+end
+
+draw = function()
+  arcade_draw()
+end
+
+// ---------------------------------------------------------------- setup ----
+
+game_init = function()
+  Mode = "topdown"
+  Background = "rgb(12,0,24)"
+
+  Chispita.ignore("bullet", "bullet")
+  Chispita.ignore("shot", "shot")
+  Chispita.ignore("shot", "bullet")
+  Chispita.ignore("core", "bullet")
+  Chispita.ignore("player", "shot")
+  Chispita.ignore("player", "core")
+
+  core = Chispita.addCircle(0, 0, 16)
+  core.name = "core"
+  core.fixed = 1
+  core.solid = 0
+  core.trigger = 1
+  core.role = "core"
+  core.group = "core"
+  core.base_color = "rgb(255,120,40)"
+  core.on_enter = function(me, other)
+    if other.role == "shot" and other.active and me.active then
+      Chispita.disable(other)
+      damage_core()
+    end
+  end
+
+  // The ship is drawn with radius 5, but only a tiny dot in the middle can be hit
+  player = Chispita.addCircle(0, -70, 5)
+  player.name = "player"
+  player.kinematic = 1
+  player.solid = 0
+  player.trigger = 1
+  player.group = "player"
+  player.color = "rgb(120,255,220)"
+  player.hit_radius = 1.5
+  player.invulnerable = 0
+  player.on_enter = function(me, other)
+    if other.role == "bullet" then player_hit() end
+  end
+
+  shots = arcade_make_pool(40, make_shot)
+  bullets = arcade_make_pool(400, make_bullet)
+
+  orbit_angle = -90
+  orbit_radius = 70
+  fire_cooldown = 0
+  bombs = 2
+  focus = 0
+end
+
+make_shot = function()
+  local s = Chispita.addCircle(0, 0, 2)
+  s.kinematic = 1
+  s.solid = 0
+  s.role = "shot"
+  s.group = "shot"
+  s.color = "rgb(150,255,255)"
+  return s
+end
+
+make_bullet = function()
+  local b = Chispita.addCircle(0, 0, 2.5)
+  b.kinematic = 1
+  b.solid = 0
+  b.role = "bullet"
+  b.group = "bullet"
+  return b
+end
+
+// ------------------------------------------------------------ stages ----
+
+game_build_stage = function(n)
+  arcade_clear_pool(bullets)
+  arcade_clear_pool(shots)
+  Chispita.enable(core)
+  core.max_hp = 60 + 30 * (n - 1)
+  core.hp = core.max_hp
+  core.flash = 0
+  core.spin = 0
+  core.spiral_timer = 0
+  core.ring_timer = 1.5
+  core.aim_timer = 2
+  core.dead_timer = 0
+  core_defeated = 0
+  orbit_angle = -90
+  orbit_radius = 70
+  game_respawn()
+end
+
+game_respawn = function()
+  Chispita.enable(player)
+  player.invulnerable = 2
+  bombs = 2
+  arcade_clear_pool(bullets)
+  place_player()
+end
+
+place_player = function()
+  local position = Chispita.angleToVector(orbit_angle, orbit_radius)
+  player.x = position.x
+  player.y = position.y
+  player.vx = 0
+  player.vy = 0
+end
+
+// ------------------------------------------------------------ bullets ----
+
+fire_bullet = function(angle, speed, color)
+  local b = arcade_take(bullets)
+  if not b then return end
+  b.x = core.x
+  b.y = core.y
+  b.color = color
+  b.grazed = 0
+  Chispita.moveAtAngle(b, angle, speed)
+end
+
+// The core's patterns get busier each stage, and in the last stage they
+// change as its health drops
+core_attack = function(dt)
+  local stage = Arcade.stage
+  local health = core.hp / core.max_hp
+
+  // Spiral arms: 2 in stage 1, 3 in stage 2, 4 at the end of stage 3
+  local arms = 2
+  local turn = 90
+  if stage >= 2 then arms = 3 end
+  if stage == 3 and health < 0.66 then
+    arms = 4
+    turn = -130     // spins the other way
+  end
+  core.spin += turn * dt
+  core.spiral_timer -= dt
+  if core.spiral_timer <= 0 then
+    for i = 0 to arms - 1
+      fire_bullet(core.spin + i * 360 / arms, 55, "rgb(255,120,200)")
+    end
+    core.spiral_timer = 0.09
+  end
+
+  // Rings of bullets in every direction
+  if stage >= 2 then
+    core.ring_timer -= dt
+    if core.ring_timer <= 0 then
+      local offset = Chispita.randomRange(0, 30)
+      for angle = 0 to 340 by 20
+        fire_bullet(angle + offset, 40, "rgb(255,220,80)")
+      end
+      core.ring_timer = 1.6
+      if stage == 3 and health < 0.33 then core.ring_timer = 0.9 end
+    end
+  end
+
+  // Fast aimed bursts at the player
+  if stage == 3 and player.active then
+    core.aim_timer -= dt
+    if core.aim_timer <= 0 then
+      local aim = Chispita.angleBetween(core, player)
+      for offset = -10 to 10 by 10
+        fire_bullet(aim + offset, 90, "rgb(120,200,255)")
+      end
+      core.aim_timer = 1.2
+    end
+  end
+end
+
+damage_core = function()
+  core.hp -= 1
+  core.flash = 0.04
+  arcade_add_score(10)
+  if core.hp > 0 then return end
+
+  Chispita.disable(core)
+  for i = 1 to 3
+    Chispita.burst(core.x, core.y, 40, core.base_color, 60 * i, 1.2, 3)
+  end
+  Chispita.shake(6, 1)
+  arcade_clear_pool(bullets)
+  arcade_add_score(10000 * Arcade.stage)
+  core_defeated = 1
+  core.dead_timer = 2
+end
+
+bomb = function()
+  bombs -= 1
+  player.invulnerable = 1
+  Chispita.shake(4, 0.4)
+  local count = 0
+  for b in bullets.items
+    if b.active then
+      // A burst for every few bullets so the screen lights up without slowing down
+      if count % 6 == 0 then Chispita.burst(b.x, b.y, 4, b.color, 40, 0.4) end
+      Chispita.disable(b)
+      count += 1
+    end
+  end
+  arcade_add_score(count * 2)
+end
+
+player_hit = function()
+  if player.invulnerable > 0 or not player.active then return end
+  Chispita.burst(player.x, player.y, 30, player.color, 90, 0.9)
+  Chispita.disable(player)
+  arcade_player_died()
+end
+
+// ------------------------------------------------------------ each frame ----
+
+game_update = function()
+  local dt = Chispita.deltaTime()   // 0 while debug-paused, follows Time_scale
+  update_player(dt)
+  update_bullets()
+  if core.active then
+    if core.flash > 0 then
+      core.flash -= dt
+      core.color = "rgb(255,255,255)"
+    else
+      // Glows redder as it gets weaker
+      local health = core.hp / core.max_hp
+      core.color = "rgb(255," + floor(60 + 100 * health) + "," + floor(40 * health) + ")"
+    end
+    if player.active and Arcade.state == "play" then core_attack(dt) end
+  end
+
+  if core_defeated then
+    core.dead_timer -= dt
+    if core.dead_timer <= 0 then arcade_stage_clear() end
+  end
+end
+
+update_player = function(dt)
+  if not player.active or Arcade.state != "play" then return end
+
+  focus = keyboard.Z
+  local turn_speed = 140
+  local move_speed = 60
+  if focus then
+    turn_speed = 60
+    move_speed = 25
+  end
+
+  // LEFT turns counterclockwise; UP moves in toward the core
+  orbit_angle += (keyboard.LEFT - keyboard.RIGHT) * turn_speed * dt
+  orbit_radius = Chispita.clamp(orbit_radius + (keyboard.DOWN - keyboard.UP) * move_speed * dt, 35, 85)
+  place_player()
+
+  fire_cooldown -= dt
+  if keyboard.SPACE and fire_cooldown <= 0 then
+    local s = arcade_take(shots)
+    if s then
+      s.x = player.x
+      s.y = player.y
+      Chispita.moveToward(s, core.x, core.y, 220)
+    end
+    fire_cooldown = 0.1
+  end
+
+  if keyboard.press.X and bombs > 0 then bomb() end
+
+  if player.invulnerable > 0 then
+    player.invulnerable -= dt
+    player.visible = floor(system.time() / 80) % 2
+  else
+    player.visible = 1
+  end
+end
+
+update_bullets = function()
+  for b in bullets.items
+    if not b.active then continue end
+    local distance = Chispita.distanceBetween(b, player)
+    // Grazing: a near miss is worth points, once per bullet
+    if player.active and not b.grazed and distance < 10 then
+      b.grazed = 1
+      arcade_add_score(5)
+    end
+    if Chispita.distance(0, 0, b.x, b.y) > 220 then Chispita.disable(b) end
+  end
+  // Shots that missed (the core was gone) fly off
+  for s in shots.items
+    if s.active and Chispita.distance(0, 0, s.x, s.y) > 220 then Chispita.disable(s) end
+  end
+end
+
+// ------------------------------------------------------------ drawing ----
+
+game_draw = function()
+  // The orbit path
+  screen.setAlpha(0.15)
+  screen.drawRound(0, 0, orbit_radius * 2, orbit_radius * 2, "rgb(120,255,220)")
+  screen.setAlpha(1)
+
+  // Spinning arms on the core
+  if core.active then
+    for i = 0 to 3
+      local arm = Chispita.angleToVector(core.spin * 1.5 + i * 90, 24)
+      screen.drawLine(core.x, core.y, core.x + arm.x, core.y + arm.y, core.color)
+    end
+    // Health bar
+    local width = 120
+    local fill = width * core.hp / core.max_hp
+    screen.fillRect(0, screen.height / 2 - 16, width + 2, 5, "rgb(60,20,0)")
+    screen.fillRect(-width / 2 + fill / 2, screen.height / 2 - 16, fill, 3, "rgb(255,140,40)")
+  end
+
+  // Focus mode shows the tiny spot that can actually be hit
+  if focus and player.active then
+    screen.fillRound(player.x, player.y, 3, 3, "rgb(255,255,255)")
+  end
+
+  // Bombs left, bottom-left
+  for i = 1 to bombs by 1
+    screen.fillRound(-screen.width / 2 + 4 + i * 7, -screen.height / 2 + 5, 4, 4, "rgb(255,120,200)")
+  end
+end

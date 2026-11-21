@@ -1,0 +1,332 @@
+// ARCADE FRAME - shared by the Chispita example games.
+// Handles everything that makes it feel like a coin-op cabinet: coins and
+// credits, the attract screen, stage intros, lives, continues, game over and
+// a saved high score. Keys: C = insert coin, ENTER (or SPACE) = start.
+//
+// A game made with it defines these five functions:
+//   game_init()            make every sprite once (disable what isn't needed yet)
+//   game_build_stage(n)    set up stage n: enable its sprites, put things in place
+//   game_respawn()         put the player back after losing a life
+//   game_update()          one frame of gameplay
+//   game_draw()            extra drawing on top of the game (can be empty)
+//
+// Then its main code is just:
+//   init = function() arcade_setup("TITLE", "controls text", ["STAGE ONE", "STAGE TWO", "STAGE THREE"]) end
+//   update = function() arcade_update() end
+//   draw = function() arcade_draw() end
+//
+// The game calls arcade_add_score(points), arcade_player_died() and
+// arcade_stage_clear() when those things happen.
+
+Arcade = object
+  title = "GAME"
+  controls = ""
+  stage_names = []
+  stages = 3
+  start_lives = 3
+  free_play = 0      // 1 = no coins needed
+  state = "title"    // title, intro, play, respawn, clear, continue, gameover, win
+  timer = 0          // seconds spent in the current state
+  credits = 0
+  score = 0
+  high_score = 0
+  lives = 3
+  stage = 1
+end
+
+arcade_dt = 1 / 60   // the cabinet (menus, countdowns) always runs in real time
+
+arcade_setup = function(title, controls, stage_names)
+  Arcade.title = title
+  Arcade.controls = controls
+  Arcade.stage_names = stage_names
+  Arcade.stages = stage_names.length
+  Arcade.high_score = storage.get(arcade_save_key())
+  if not Arcade.high_score then Arcade.high_score = 0 end
+
+  game_init()
+  game_build_stage(1)   // shown frozen behind the title screen
+  arcade_set_state("title")
+end
+
+arcade_save_key = function()
+  return "chispita_hi_" + Arcade.title
+end
+
+arcade_set_state = function(state)
+  Arcade.state = state
+  Arcade.timer = 0
+end
+
+// ---- Things the game calls ----
+
+arcade_add_score = function(points)
+  Arcade.score += points
+  if Arcade.score > Arcade.high_score then Arcade.high_score = Arcade.score end
+end
+
+arcade_player_died = function()
+  if Arcade.state != "play" then return end
+  Arcade.lives -= 1
+  Chispita.shake(3, 0.3)
+  if Arcade.lives > 0 then
+    arcade_set_state("respawn")
+  else
+    arcade_set_state("continue")
+  end
+end
+
+arcade_stage_clear = function()
+  if Arcade.state != "play" then return end
+  arcade_set_state("clear")
+end
+
+// ---- Coins and starting ----
+
+// Uses up one credit; returns 1 if the player could pay
+arcade_pay = function()
+  if Arcade.free_play then return 1 end
+  if Arcade.credits > 0 then
+    Arcade.credits -= 1
+    return 1
+  end
+  return 0
+end
+
+arcade_start_pressed = function()
+  return keyboard.press.ENTER or keyboard.press.SPACE
+end
+
+arcade_new_game = function()
+  Arcade.score = 0
+  Arcade.lives = Arcade.start_lives
+  Arcade.stage = 1
+  arcade_start_stage()
+end
+
+arcade_start_stage = function()
+  game_build_stage(Arcade.stage)
+  arcade_set_state("intro")
+end
+
+arcade_save_high_score = function()
+  storage.set(arcade_save_key(), Arcade.high_score)
+end
+
+// ---- Every frame ----
+
+arcade_update = function()
+  Arcade.timer += arcade_dt
+  if keyboard.press.C then Arcade.credits = min(Arcade.credits + 1, 9) end
+
+  local state = Arcade.state
+  if state == "title" then
+    if arcade_start_pressed() and arcade_pay() then arcade_new_game() end
+
+  elsif state == "intro" then
+    if Arcade.timer > 2 then arcade_set_state("play") end
+
+  elsif state == "play" then
+    game_update()
+    Chispita.update()
+
+  elsif state == "respawn" then
+    // The world keeps moving for a moment so explosions can finish
+    game_update()
+    Chispita.update()
+    if Arcade.timer > 1.5 then
+      game_respawn()
+      arcade_set_state("play")
+    end
+
+  elsif state == "clear" then
+    game_update()
+    Chispita.update()
+    if Arcade.timer > 2.5 then
+      Arcade.stage += 1
+      if Arcade.stage > Arcade.stages then
+        arcade_save_high_score()
+        arcade_set_state("win")
+      else
+        arcade_start_stage()
+      end
+    end
+
+  elsif state == "continue" then
+    Chispita.update()
+    if arcade_start_pressed() and arcade_pay() then
+      Arcade.lives = Arcade.start_lives
+      game_respawn()
+      arcade_set_state("play")
+    elsif Arcade.timer > 10 then
+      arcade_save_high_score()
+      arcade_set_state("gameover")
+    end
+
+  elsif state == "gameover" then
+    if Arcade.timer > 4 then
+      game_build_stage(1)
+      arcade_set_state("title")
+    end
+
+  elsif state == "win" then
+    Chispita.update()
+    if Arcade.timer > 7 then
+      game_build_stage(1)
+      arcade_set_state("title")
+    end
+  end
+end
+
+// ---- Drawing ----
+
+arcade_draw = function()
+  Chispita.draw()
+  game_draw()
+  arcade_draw_hud()
+  arcade_draw_message()
+end
+
+// Text with a shadow, readable over anything
+arcade_text = function(text, x, y, size, color)
+  screen.drawText(text, x + 0.8, y - 0.8, size, "rgb(0,0,0)")
+  screen.drawText(text, x, y, size, color)
+end
+
+arcade_blink = function()
+  return floor(system.time() / 400) % 2 == 0
+end
+
+// 120 -> "000120"
+arcade_pad = function(n, digits)
+  local text = "" + floor(n)
+  while text.length < digits
+    text = "0" + text
+  end
+  return text
+end
+
+arcade_draw_hud = function()
+  local top = screen.height / 2 - 6
+  local left = -screen.width / 2 + 6
+  local right = screen.width / 2 - 6
+
+  screen.setDrawAnchor(-1, 0)
+  arcade_text("1UP " + arcade_pad(Arcade.score, 6), left, top, 7, "rgb(255,255,255)")
+  // One small block per life left
+  for i = 1 to Arcade.lives - 1 by 1
+    screen.fillRect(left + 2 + (i - 1) * 7, top - 9, 5, 4, "rgb(255,200,80)")
+  end
+  screen.setDrawAnchor(1, 0)
+  arcade_text("STAGE " + Arcade.stage, right, top, 7, "rgb(255,255,255)")
+  screen.setDrawAnchor(0, 0)
+  arcade_text("HI " + arcade_pad(Arcade.high_score, 6), 0, top, 7, "rgb(255,220,0)")
+
+  local credit_text = "CREDITS " + Arcade.credits
+  if Arcade.free_play then credit_text = "FREE PLAY" end
+  arcade_text(credit_text, 0, -screen.height / 2 + 5, 6, "rgb(180,180,180)")
+end
+
+arcade_dim = function(amount)
+  screen.setAlpha(amount)
+  screen.fillRect(0, 0, screen.width, screen.height, "rgb(0,0,0)")
+  screen.setAlpha(1)
+end
+
+arcade_draw_message = function()
+  local state = Arcade.state
+  local white = "rgb(255,255,255)"
+  local yellow = "rgb(255,220,0)"
+
+  if state == "title" then
+    arcade_dim(0.6)
+    arcade_text(Arcade.title, 0, 40, 22, yellow)
+    if Arcade.credits > 0 or Arcade.free_play then
+      if arcade_blink() then arcade_text("PRESS START", 0, 5, 10, white) end
+    else
+      if arcade_blink() then arcade_text("INSERT COIN", 0, 5, 10, white) end
+    end
+    arcade_text("C = COIN    ENTER = START", 0, -15, 6, "rgb(180,180,180)")
+    arcade_text(Arcade.controls, 0, -27, 6, "rgb(180,180,180)")
+    arcade_text("HIGH SCORE " + arcade_pad(Arcade.high_score, 6), 0, -45, 7, yellow)
+
+  elsif state == "intro" then
+    arcade_text("STAGE " + Arcade.stage, 0, 12, 14, white)
+    arcade_text(Arcade.stage_names[Arcade.stage - 1], 0, -4, 8, yellow)
+    if Arcade.timer > 1 and arcade_blink() then arcade_text("READY", 0, -20, 8, white) end
+
+  elsif state == "respawn" then
+    if Arcade.timer > 0.5 then arcade_text("READY", 0, 0, 10, white) end
+
+  elsif state == "clear" then
+    arcade_text("STAGE CLEAR", 0, 8, 14, yellow)
+
+  elsif state == "continue" then
+    arcade_dim(0.5)
+    arcade_text("CONTINUE?", 0, 20, 14, white)
+    arcade_text("" + max(0, ceil(10 - Arcade.timer)), 0, -2, 20, yellow)
+    if Arcade.credits > 0 or Arcade.free_play then
+      if arcade_blink() then arcade_text("PRESS START", 0, -24, 8, white) end
+    else
+      if arcade_blink() then arcade_text("INSERT COIN", 0, -24, 8, white) end
+    end
+
+  elsif state == "gameover" then
+    arcade_dim(0.5)
+    arcade_text("GAME OVER", 0, 5, 18, "rgb(255,80,80)")
+
+  elsif state == "win" then
+    arcade_dim(0.4)
+    arcade_text("CONGRATULATIONS!", 0, 20, 14, yellow)
+    arcade_text("ALL STAGES CLEAR", 0, 2, 8, white)
+    arcade_text("FINAL SCORE " + arcade_pad(Arcade.score, 6), 0, -14, 8, white)
+  end
+end
+
+// ---- Object pools ----
+// Bullets and enemies are made once and reused: a pool hands out a
+// switched-off sprite and switches it on. Nothing is ever deleted.
+
+// make is a function that builds one sprite
+arcade_make_pool = function(count, make)
+  local pool = object end
+  pool.items = []
+  pool.next = 0
+  for i = 1 to count
+    local s = make()
+    Chispita.disable(s)
+    pool.items.push(s)
+  end
+  return pool
+end
+
+// A switched-off sprite from the pool, switched on and standing still,
+// or 0 if they're all in use
+arcade_take = function(pool)
+  local count = pool.items.length
+  for tries = 1 to count
+    local s = pool.items[pool.next]
+    pool.next = (pool.next + 1) % count
+    if not s.active then
+      Chispita.enable(s)
+      s.vx = 0
+      s.vy = 0
+      return s
+    end
+  end
+  return 0
+end
+
+arcade_clear_pool = function(pool)
+  for s in pool.items
+    Chispita.disable(s)
+  end
+end
+
+arcade_count_active = function(pool)
+  local count = 0
+  for s in pool.items
+    if s.active then count += 1 end
+  end
+  return count
+end

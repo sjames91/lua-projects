@@ -1,0 +1,392 @@
+// STAR DART - a side-scrolling space shooter made with Chispita.
+// Arrows move, hold SPACE to fire. Clear the enemy waves, then beat the boss.
+// Needs: the chispita engine files and arcade in the same project (see README).
+
+init = function()
+  arcade_setup("STAR DART", "ARROWS MOVE   SPACE FIRE", ["OUTER BELT", "ASTEROID GATE", "MOTHERSHIP"])
+end
+
+update = function()
+  arcade_update()
+end
+
+draw = function()
+  arcade_draw()
+end
+
+// ---------------------------------------------------------------- setup ----
+
+game_init = function()
+  Mode = "topdown"
+  Background = "rgb(4,4,16)"
+  half_w = screen.width / 2
+  half_h = screen.height / 2
+
+  // Things that never need to hit each other skip the collision checks
+  Chispita.ignore("shot", "shot")
+  Chispita.ignore("shot", "enemy_shot")
+  Chispita.ignore("enemy_shot", "enemy_shot")
+  Chispita.ignore("enemy", "enemy")
+  Chispita.ignore("enemy", "enemy_shot")
+  Chispita.ignore("player", "shot")
+
+  make_stars()
+
+  player = Chispita.addRect(0, 0, 14, 8)
+  player.name = "player"
+  player.kinematic = 1     // moves by its own velocity, nothing pushes it
+  player.solid = 0
+  player.trigger = 1
+  player.group = "player"
+  player.color = "rgb(120,220,255)"
+  player.hit_width = 8     // smaller than the drawing, near misses feel fair
+  player.hit_height = 4
+  player.invulnerable = 0
+  player.on_enter = function(me, other)
+    if other.role == "enemy" or other.role == "enemy_shot" then player_hit() end
+  end
+
+  shots = arcade_make_pool(30, make_shot)
+  enemies = arcade_make_pool(24, make_enemy)
+  enemy_shots = arcade_make_pool(80, make_enemy_shot)
+
+  boss = Chispita.addRect(0, 0, 34, 40)
+  boss.name = "boss"
+  boss.kinematic = 1
+  boss.solid = 0
+  boss.role = "enemy"
+  boss.group = "enemy"
+  boss.is_boss = 1
+  boss.base_color = "rgb(200,60,90)"
+  boss.color = boss.base_color
+  Chispita.disable(boss)
+
+  fire_cooldown = 0
+  waves_per_stage = [8, 10, 12]
+end
+
+make_stars = function()
+  stars = []
+  for i = 1 to 50
+    local star = Chispita.addRect(Chispita.randomRange(-half_w, half_w), Chispita.randomRange(-half_h, half_h), 1, 1, 1)
+    star.speed = Chispita.randomRange(20, 120)
+    local shade = floor(star.speed * 2)
+    star.color = "rgb(" + shade + "," + shade + "," + shade + ")"
+    Chispita.setLayer(star, 0)
+    stars.push(star)
+  end
+end
+
+make_shot = function()
+  local s = Chispita.addRect(0, 0, 8, 2)
+  s.kinematic = 1
+  s.solid = 0
+  s.trigger = 1
+  s.group = "shot"
+  s.role = "shot"
+  s.color = "rgb(255,255,120)"
+  s.on_enter = function(me, other)
+    if other.role == "enemy" and me.active then
+      Chispita.disable(me)
+      damage_enemy(other)
+    end
+  end
+  return s
+end
+
+make_enemy = function()
+  local e = Chispita.addCircle(0, 0, 6)
+  e.kinematic = 1
+  e.solid = 0
+  e.group = "enemy"
+  e.role = "enemy"
+  return e
+end
+
+make_enemy_shot = function()
+  local b = Chispita.addCircle(0, 0, 2)
+  b.kinematic = 1
+  b.solid = 0
+  b.group = "enemy_shot"
+  b.role = "enemy_shot"
+  b.color = "rgb(255,90,200)"
+  return b
+end
+
+// ------------------------------------------------------------ stages ----
+
+game_build_stage = function(n)
+  arcade_clear_pool(enemies)
+  arcade_clear_pool(shots)
+  arcade_clear_pool(enemy_shots)
+  Chispita.disable(boss)
+  waves_left = waves_per_stage[n - 1]
+  wave_timer = 1.5
+  boss_defeated = 0
+  boss_clear_timer = 0
+  difficulty = 1 + (n - 1) * 0.3
+  game_respawn()
+end
+
+game_respawn = function()
+  Chispita.enable(player)
+  player.x = -half_w + 30
+  player.y = 0
+  player.vx = 0
+  player.vy = 0
+  player.invulnerable = 2
+  arcade_clear_pool(enemy_shots)
+end
+
+spawn_wave = function()
+  // Stage 1 has two kinds of wave, later stages add shooters
+  local pattern = Chispita.randomInt(1, min(3, Arcade.stage + 1))
+  local y = Chispita.randomRange(-half_h + 35, half_h - 35)
+  if pattern == 1 then
+    for i = 0 to 4
+      spawn_enemy("drone", half_w + 10 + i * 18, y)
+    end
+  elsif pattern == 2 then
+    for i = 0 to 5
+      spawn_enemy("sine", half_w + 10 + i * 16, y)
+    end
+  else
+    for i = 0 to 2
+      spawn_enemy("shooter", half_w + 10 + i * 30, -50 + i * 50)
+    end
+  end
+end
+
+spawn_enemy = function(type, x, y)
+  local e = arcade_take(enemies)
+  if not e then return end
+  e.type = type
+  e.x = x
+  e.y = y
+  e.base_y = y
+  e.t = 0
+  e.flash = 0
+  e.hp = 1
+  e.vx = -70 * difficulty
+  e.shoot_timer = Chispita.randomRange(0.5, 1.5)
+  if type == "drone" then
+    e.base_color = "rgb(255,150,60)"
+  elsif type == "sine" then
+    e.base_color = "rgb(120,255,120)"
+  else
+    e.base_color = "rgb(255,80,80)"
+    e.hp = 3
+    e.vx = -35 * difficulty
+  end
+  e.color = e.base_color
+end
+
+start_boss = function()
+  Chispita.enable(boss)
+  boss.x = half_w + 30
+  boss.y = 0
+  boss.vx = -30
+  boss.vy = 0
+  boss.entering = 1
+  boss.max_hp = 30 + 25 * (Arcade.stage - 1)
+  boss.hp = boss.max_hp
+  boss.flash = 0
+  boss.spread_timer = 1
+  boss.ring_timer = 2
+  boss.spiral_timer = 0
+  boss.spin = 0
+end
+
+// ------------------------------------------------------------ shooting ----
+
+fire_bullet = function(x, y, angle, speed)
+  local b = arcade_take(enemy_shots)
+  if not b then return end
+  b.x = x
+  b.y = y
+  Chispita.moveAtAngle(b, angle, speed)
+end
+
+damage_enemy = function(e)
+  if not e.active then return end
+  e.hp -= 1
+  e.flash = 0.05
+  if e.hp > 0 then return end
+
+  Chispita.disable(e)
+  if e.is_boss then
+    Chispita.burst(e.x, e.y, 60, e.base_color, 120, 1.2, 3)
+    Chispita.shake(5, 0.8)
+    arcade_clear_pool(enemy_shots)
+    arcade_add_score(5000 * Arcade.stage)
+    boss_defeated = 1
+    boss_clear_timer = 1.5
+  else
+    Chispita.burst(e.x, e.y, 12, e.base_color)
+    if e.type == "shooter" then arcade_add_score(300) else arcade_add_score(100) end
+  end
+end
+
+player_hit = function()
+  if player.invulnerable > 0 or not player.active then return end
+  Chispita.burst(player.x, player.y, 30, player.color, 90, 0.8)
+  Chispita.disable(player)
+  arcade_player_died()
+end
+
+// ------------------------------------------------------------ each frame ----
+
+game_update = function()
+  local dt = Chispita.deltaTime()   // 0 while debug-paused, follows Time_scale
+  update_stars(dt)
+  update_player(dt)
+  update_enemies(dt)
+  if boss.active then update_boss(dt) end
+  remove_offscreen()
+
+  if Arcade.state != "play" then return end
+
+  // Waves first, then the boss once the screen is empty
+  if waves_left > 0 then
+    wave_timer -= dt
+    if wave_timer <= 0 then
+      spawn_wave()
+      waves_left -= 1
+      wave_timer = 2.6 / difficulty
+    end
+  elsif not boss.active and not boss_defeated and arcade_count_active(enemies) == 0 then
+    start_boss()
+  end
+
+  if boss_defeated then
+    boss_clear_timer -= dt
+    if boss_clear_timer <= 0 then arcade_stage_clear() end
+  end
+end
+
+update_stars = function(dt)
+  for star in stars
+    star.x = Chispita.wrap(star.x - star.speed * dt, -half_w, half_w)
+  end
+end
+
+update_player = function(dt)
+  if not player.active then return end
+  local speed = 110
+  player.vx = (keyboard.RIGHT - keyboard.LEFT) * speed
+  player.vy = (keyboard.UP - keyboard.DOWN) * speed
+  player.x = Chispita.clamp(player.x, -half_w + 8, half_w - 8)
+  player.y = Chispita.clamp(player.y, -half_h + 12, half_h - 16)
+
+  fire_cooldown -= dt
+  if keyboard.SPACE and fire_cooldown <= 0 then
+    local s = arcade_take(shots)
+    if s then
+      s.x = player.x + 8
+      s.y = player.y
+      s.vx = 320
+    end
+    fire_cooldown = 0.12
+  end
+
+  // Blink while invulnerable after respawning
+  if player.invulnerable > 0 then
+    player.invulnerable -= dt
+    player.visible = floor(system.time() / 80) % 2
+  else
+    player.visible = 1
+  end
+end
+
+update_flash = function(e, dt)
+  if e.flash > 0 then
+    e.flash -= dt
+    e.color = "rgb(255,255,255)"
+  else
+    e.color = e.base_color
+  end
+end
+
+update_enemies = function(dt)
+  for e in enemies.items
+    if not e.active then continue end
+    e.t += dt
+    update_flash(e, dt)
+    if e.type == "sine" then
+      e.y = e.base_y + sin(e.t * 3) * 30
+    elsif e.type == "shooter" and player.active then
+      e.shoot_timer -= dt
+      if e.shoot_timer <= 0 then
+        fire_bullet(e.x, e.y, Chispita.angleBetween(e, player), 80 * difficulty)
+        e.shoot_timer = 1.6 / difficulty
+      end
+    end
+  end
+end
+
+update_boss = function(dt)
+  update_flash(boss, dt)
+
+  // Slide in, then move up and down
+  if boss.entering and boss.x <= half_w - 45 then
+    boss.entering = 0
+    boss.vx = 0
+    boss.vy = 40 * difficulty
+  end
+  if boss.y > half_h - 35 then boss.vy = -abs(boss.vy) end
+  if boss.y < -half_h + 30 then boss.vy = abs(boss.vy) end
+  if boss.entering or not player.active then return end
+
+  // Stage 1: aimed spreads. Stage 2 adds rings. Stage 3 adds a spiral.
+  boss.spread_timer -= dt
+  if boss.spread_timer <= 0 then
+    local aim = Chispita.angleBetween(boss, player)
+    for offset = -15 to 15 by 15
+      fire_bullet(boss.x - 15, boss.y, aim + offset, 90 * difficulty)
+    end
+    boss.spread_timer = 0.9
+  end
+
+  if Arcade.stage >= 2 then
+    boss.ring_timer -= dt
+    if boss.ring_timer <= 0 then
+      for angle = 0 to 330 by 30
+        fire_bullet(boss.x, boss.y, angle, 55)
+      end
+      boss.ring_timer = 1.8
+    end
+  end
+
+  if Arcade.stage >= 3 then
+    boss.spiral_timer -= dt
+    if boss.spiral_timer <= 0 then
+      boss.spin += 23
+      fire_bullet(boss.x, boss.y, boss.spin, 70)
+      boss.spiral_timer = 0.08
+    end
+  end
+end
+
+remove_offscreen = function()
+  for s in shots.items
+    if s.active and s.x > half_w + 10 then Chispita.disable(s) end
+  end
+  for e in enemies.items
+    if e.active and e.x < -half_w - 30 then Chispita.disable(e) end
+  end
+  for b in enemy_shots.items
+    if b.active and (abs(b.x) > half_w + 10 or abs(b.y) > half_h + 10) then Chispita.disable(b) end
+  end
+end
+
+// ------------------------------------------------------------ drawing ----
+
+game_draw = function()
+  // Boss health bar
+  if boss.active then
+    local width = 120
+    local fill = width * boss.hp / boss.max_hp
+    screen.fillRect(0, half_h - 16, width + 2, 5, "rgb(60,0,20)")
+    screen.fillRect(-width / 2 + fill / 2, half_h - 16, fill, 3, "rgb(255,60,90)")
+  end
+end
